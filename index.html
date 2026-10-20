@@ -7207,8 +7207,9 @@ function renderDrawer(){
 /* =========================================================
    ITEMS (Master Data catalog)
 ========================================================= */
+function masterGoodsItems(){ return state.items.filter(i=>i.category!=='WIP Kitchen' && i.category!=='WIP Bar'); }
 function getFilteredItemsMaster(){
-  let list = state.items;
+  let list = masterGoodsItems();
   if(state.itemsSearch){ const q = state.itemsSearch.toLowerCase(); list = list.filter(i => (i.name||'').toLowerCase().includes(q) || (i.kode||'').toLowerCase().includes(q)); }
   if(state.itemsCategory) list = list.filter(i => i.category === state.itemsCategory);
   if(state.itemsPriceMin !== ''){ const min = parsePriceInput(state.itemsPriceMin); list = list.filter(i => (i.lastPrice||0) >= min); }
@@ -7255,6 +7256,7 @@ function renderItemsMaster(){
   const role = currentRole();
   const editable = canEditMaster(role);
   const filtered = getFilteredItemsMaster();
+  const goodsTotal = masterGoodsItems().length;
   const filtersActive = state.itemsSearch || state.itemsCategory || state.itemsPriceMin!=='' || state.itemsPriceMax!=='';
   const pageSize = state.itemsPageSize;
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
@@ -7281,10 +7283,10 @@ function renderItemsMaster(){
         </div>
       </div>` : ''}
     <div class="panel">
-      <div class="panel-head"><h3>Barang</h3><span class="hint">${filtersActive ? filtered.length + ' dari ' + state.items.length : state.items.length} barang</span></div>
+      <div class="panel-head"><h3>Barang</h3><span class="hint">${filtersActive ? filtered.length + ' dari ' + goodsTotal : goodsTotal} barang</span></div>
       <div class="filter-row">
         <input type="text" id="itemsSearchInput" style="min-width:200px;" placeholder="Cari nama atau kode…" value="${escapeHtml(state.itemsSearch)}" oninput="setItemsSearch(this.value)">
-        <select onchange="setItemsCategory(this.value)"><option value="">Semua Kategori</option>${ITEM_CATEGORIES.map(c=>`<option value="${c}" ${state.itemsCategory===c?'selected':''}>${c}</option>`).join('')}</select>
+        <select onchange="setItemsCategory(this.value)"><option value="">Semua Kategori</option>${ITEM_CATEGORIES.filter(c=>c!=='WIP Kitchen' && c!=='WIP Bar').map(c=>`<option value="${c}" ${state.itemsCategory===c?'selected':''}>${c}</option>`).join('')}</select>
         <input type="text" inputmode="numeric" id="itemsPriceMinInput" class="narrow" placeholder="Harga min" value="${escapeHtml(state.itemsPriceMin)}" oninput="formatPriceInput(this); setItemsPriceMin(this.value);">
         <input type="text" inputmode="numeric" id="itemsPriceMaxInput" class="narrow" placeholder="Harga maks" value="${escapeHtml(state.itemsPriceMax)}" oninput="formatPriceInput(this); setItemsPriceMax(this.value);">
         ${filtersActive ? `<button class="btn btn-sm btn-outline" onclick="resetItemsFilters()">Reset</button>` : ''}
@@ -7297,7 +7299,7 @@ function renderItemsMaster(){
             <th>Kode</th><th>Nama Barang</th><th>Kategori</th><th>Satuan Besar</th><th>Satuan Kecil</th><th class="num">Harga/Satuan</th><th class="num">Harga/Satuan Kecil</th><th class="num">Reorder Level</th>${editable?'<th></th>':''}
           </tr></thead>
           <tbody>
-            ${pageItems.length===0 ? `<tr class="empty-row"><td colspan="${editable?10:8}">${state.items.length===0?'Belum ada barang.':'Tidak ada barang yang cocok dengan filter.'}</td></tr>` :
+            ${pageItems.length===0 ? `<tr class="empty-row"><td colspan="${editable?10:8}">${goodsTotal===0?'Belum ada barang.':'Tidak ada barang yang cocok dengan filter.'}</td></tr>` :
               pageItems.map(i=>{
                 const stock = totalStock(i.id);
                 const hasSmall = srHasSmallUnit(i);
