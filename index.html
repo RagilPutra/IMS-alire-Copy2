@@ -1319,7 +1319,14 @@ function rebuildStockIndex(){
     }
   });
 }
-function rebuildItemIndex(){ itemIndex = {}; state.items.forEach(i=>{ itemIndex[i.id] = i; }); }
+/* itemIndex (itemById) covers EVERY item doc, including archived ones;
+   state.items holds only the active catalog. Archived items are old master
+   records retired by a master-data cleanup: they're hidden from Master
+   Barang, pickers, Inventory, exports and stock, but must stay resolvable by
+   id because historical records (Stok Opname snapshots, past transactions,
+   Laporan SO category/unit display) still point at them -- without them an
+   old period's report would silently change. */
+function rebuildItemIndex(){ itemIndex = {}; (state.allItems || state.items).forEach(i=>{ itemIndex[i.id] = i; }); }
 function stockQty(warehouseId, itemId){ return stockIndex[warehouseId+'__'+itemId] || 0; }
 function stockQtyByPeruntukan(warehouseId, itemId, peruntukan){ return peruntukanIndex[warehouseId+'__'+itemId+'__'+(peruntukan||'mix')] || 0; }
 function itemById(id){ return itemIndex[id]; }
@@ -1592,7 +1599,8 @@ async function initDb(){
   dbReady = true;
 
   db.collection('items').onSnapshot(snap=>{
-    state.items = snap.docs.map(d=>({id:d.id, ...d.data()})).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+    state.allItems = snap.docs.map(d=>({id:d.id, ...d.data()})).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+    state.items = state.allItems.filter(i=>!i.archived);
     rebuildItemIndex();
     const liveIds = new Set(state.items.map(i=>i.id));
     [...state.itemsSelected].forEach(id=>{ if(!liveIds.has(id)) state.itemsSelected.delete(id); });
@@ -1864,7 +1872,7 @@ async function applyStorageIncrease(warehouseId, itemId, addQty){
    collides, instead of guessing from the item count (which drifts once
    any item is deleted or codes have gaps). */
 function nextItemCode(category){
-  const items = state.items;
+  const items = state.allItems || state.items; // include archived so a new code never reuses a retired item's code
   if(category === 'WIP Kitchen' || category === 'WIP Bar'){
     const prefix = category === 'WIP Kitchen' ? 'K' : 'B';
     const re = new RegExp('^' + prefix + '-(\\d+)$', 'i');
@@ -9703,7 +9711,7 @@ function confirmLogout(){ openConfirm('Keluar', 'Keluar dari akun ini?', logout,
 // partial "recent activity" snapshot. Works unchanged on both the Claude
 // Artifact (real Firestore) and the Railway deploy (its Firestore-lite
 // shim over Postgres) since both expose the same db.collection(x).get().
-const BACKUP_COLLECTIONS = ['users','items','stock','transactions','suppliers','opnameSessions','opnameDrafts','monthlyNetSales'];
+const BACKUP_COLLECTIONS = ['users','items','stock','transactions','suppliers','opnameSessions','opnameDetails','opnameDrafts','monthlyNetSales'];
 // forSeed=false (default): a human-readable full backup, one JSON file with
 // every collection's documents spread flat ({id, ...fields}) under a
 // metadata wrapper.
