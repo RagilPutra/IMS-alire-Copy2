@@ -10672,7 +10672,7 @@ function srLineHintHtml(line){
   let warn = '';
   if(avail <= 0.0001) warn = 'Stok barang ini sedang habis.';
   else if(qtyBase > avail + 0.0005) warn = 'Stok tersedia hanya ' + fmtNum(avail) + ' ' + escapeHtml(item.uom) + ', kurang dari jumlah diminta.';
-  if(warn) html += (html?' · ':'') + '<span style="color:var(--danger); font-weight:600;">⚠ ' + warn + ' Permintaan tetap bisa dikirim, Receiving akan diberi peringatan.</span>';
+  if(warn) html += (html?' · ':'') + '<span style="color:var(--danger); font-weight:600;">⚠ ' + warn + '</span>';
   return html;
 }
 function srUpdateLineHint(idx){
