@@ -7107,17 +7107,35 @@ function openTransferDetail(docNumber){
   if(lines.length===0) return;
   const first = lines[0];
   const total = lines.reduce((s,l)=>s+(l.totalValue||0),0);
+  const noteInfo = docNotesInfo(lines);
   const body = `
     <div class="lock-note">Dari <b>${escapeHtml(first.fromWarehouseName)}</b> → Ke <b>${escapeHtml(first.toWarehouseName)}</b> · ${fmtDate(first.createdAt)}${first.requestDocNumber?` · Permintaan <b>${first.requestDocNumber}</b>`:''}</div>
     <div class="table-scroll" style="border:1px solid var(--border); border-radius:8px;">
       <table><thead><tr><th>Barang</th><th class="num">Jumlah</th><th class="num">Nilai</th></tr></thead>
-      <tbody>${lines.map(l=>`<tr><td>${escapeHtml(l.itemName)}${l.note?`<div class="cell-sub">${escapeHtml(l.note)}</div>`:''}</td><td class="num">${qtyWithSmallNote(l.qty, itemById(l.itemId), l.uom)}</td><td class="num">${fmtIDR(l.totalValue||0)}</td></tr>`).join('')}</tbody></table>
+      <tbody>${lines.map(l=>`<tr><td>${escapeHtml(l.itemName)}${(!noteInfo.shared && l.note)?`<div class="cell-sub">${escapeHtml(l.note)}</div>`:''}</td><td class="num">${qtyWithSmallNote(l.qty, itemById(l.itemId), l.uom)}</td><td class="num">${fmtIDR(l.totalValue||0)}</td></tr>`).join('')}</tbody></table>
     </div>
+    ${noteInfo.shared ? docNotesBlockHtml({note: noteInfo.note}) : ''}
     <div style="margin-top:12px; text-align:right; font-size:13px;">Total: <b>${fmtIDR(total)}</b></div>
   `;
   openModal('Transfer ' + docNumber, body, `<button class="btn btn-outline" onclick="closeModal()">Tutup</button>`, true);
 }
 
+/* A request's Catatan is a document-level field that gets copied onto every
+   line when it's saved. Show it ONCE under the table instead of repeating it
+   on each item. (Only if lines somehow carry different notes -- e.g. legacy
+   data -- fall back to showing each line's own note.) */
+function docNotesInfo(lines){
+  const notes = [...new Set(lines.map(l=>l.note).filter(Boolean))];
+  const leaders = [...new Set(lines.map(l=>l.leaderNote).filter(Boolean))];
+  const lw = lines.find(l=>l.leaderNote) || {};
+  return { shared: notes.length<=1 && leaders.length<=1, note: notes[0]||'', leaderNote: leaders[0]||'', leaderBy: lw.leaderNoteBy||'' };
+}
+function docNotesBlockHtml(info){
+  let h = '';
+  if(info.note) h += `<div class="field" style="margin-top:14px; margin-bottom:0;"><label>Catatan</label><div class="cell-sub" style="background:var(--surface-2); padding:8px 10px; border-radius:6px; color:var(--text); white-space:pre-wrap;">${escapeHtml(info.note)}</div></div>`;
+  if(info.leaderNote) h += `<div class="field" style="margin-top:10px; margin-bottom:0;"><label>Catatan Kitchen Leader${info.leaderBy?' ('+escapeHtml(info.leaderBy)+')':''}</label><div class="cell-sub" style="background:var(--brand-tint); padding:8px 10px; border-radius:6px; color:var(--brand-dark); font-weight:700; white-space:pre-wrap;">${escapeHtml(info.leaderNote)}</div></div>`;
+  return h;
+}
 function openSrDetail(docNumber){
   const lines = state.srTransactions.filter(t=>t.type==='request' && t.docNumber===docNumber);
   if(lines.length===0) return;
@@ -7129,6 +7147,7 @@ function openSrDetail(docNumber){
   // from `first` -- `first` stays valid only for doc-wide display fields
   // (division/warehouse name, created date) which never vary per line.
   const pendingLine = lines.find(l=>l.status==='menunggu');
+  const noteInfo = docNotesInfo(lines);
   const body = `
     <div class="lock-note">Divisi <b>${escapeHtml(first.divisionName || first.toWarehouseName)}</b>${first.divisionName && first.divisionName!==first.toWarehouseName ? ` · Gudang ${escapeHtml(first.toWarehouseName)}` : ''} · ${fmtDate(first.createdAt)}</div>
     <div class="table-scroll" style="border:1px solid var(--border); border-radius:8px;">
@@ -7136,11 +7155,11 @@ function openSrDetail(docNumber){
       <tbody>${lines.map(l=>{
         const primary = l.requestedUnit ? (fmtNum(l.requestedQty) + ' ' + escapeHtml(l.requestedUnit)) : (fmtNum(l.qty) + ' ' + escapeHtml(l.uom||''));
         const sub = l.requestedUnit ? `<div class="cell-sub">≈ ${fmtNum(l.qty)} ${escapeHtml(l.uom||'')}</div>` : '';
-        const requesterNote = l.note ? `<div class="cell-sub">Catatan: ${escapeHtml(l.note)}</div>` : '';
+        const requesterNote = (!noteInfo.shared && l.note) ? `<div class="cell-sub">Catatan: ${escapeHtml(l.note)}</div>` : '';
         /* Leader's revision note is styled distinctly (bold, brand color) and
            attributed by name, so Receiving never mistakes it for the
            original requester's note -- that ambiguity was the complaint. */
-        const leaderNoteHtml = l.leaderNote ? `<div class="cell-sub" style="color:var(--brand-dark); font-weight:700;">Catatan Kitchen Leader${l.leaderNoteBy?' ('+escapeHtml(l.leaderNoteBy)+')':''}: ${escapeHtml(l.leaderNote)}</div>` : '';
+        const leaderNoteHtml = (!noteInfo.shared && l.leaderNote) ? `<div class="cell-sub" style="color:var(--brand-dark); font-weight:700;">Catatan Kitchen Leader${l.leaderNoteBy?' ('+escapeHtml(l.leaderNoteBy)+')':''}: ${escapeHtml(l.leaderNote)}</div>` : '';
         // Per-line status/transfer/reject-note, since a document's lines can
         // each be at a different stage after a partial approval -- one
         // doc-level status is no longer enough to describe every row.
@@ -7152,6 +7171,7 @@ function openSrDetail(docNumber){
         return `<tr><td>${escapeHtml(l.itemName)}${requesterNote}${leaderNoteHtml}</td><td class="num">${primary}${sub}</td><td>${lineStatusHtml}</td></tr>`;
       }).join('')}</tbody></table>
     </div>
+    ${noteInfo.shared ? docNotesBlockHtml(noteInfo) : ''}
     <div style="margin-top:12px;">Status Permintaan: ${srDocStatusTag(lines)}</div>
     ${(function(){
       if(!canApproveSR(role)) return '';
@@ -7251,6 +7271,7 @@ function openWipDetail(docNumber){
   const role = currentRole();
   const first = lines[0];
   if(!canSeeSRForDivision(role, first.divisionId)){ toast('Anda tidak dapat melihat permintaan ini.', true); return; }
+  const noteInfo = docNotesInfo(lines);
   const body = `
     <div class="lock-note">Divisi <b>${escapeHtml(first.divisionName||'—')}</b> · ${fmtDate(first.createdAt)}</div>
     <div class="table-scroll" style="border:1px solid var(--border); border-radius:8px;">
@@ -7258,11 +7279,12 @@ function openWipDetail(docNumber){
       <tbody>${lines.map(l=>{
         const primary = l.requestedUnit ? (fmtNum(l.requestedQty) + ' ' + escapeHtml(l.requestedUnit)) : (fmtNum(l.qty) + ' ' + escapeHtml(l.uom||''));
         const sub = l.requestedUnit ? `<div class="cell-sub">≈ ${fmtNum(l.qty)} ${escapeHtml(l.uom||'')}</div>` : '';
-        const requesterNote = l.note ? `<div class="cell-sub">Catatan: ${escapeHtml(l.note)}</div>` : '';
-        const leaderNoteHtml = l.leaderNote ? `<div class="cell-sub" style="color:var(--brand-dark); font-weight:700;">Catatan Kitchen Leader${l.leaderNoteBy?' ('+escapeHtml(l.leaderNoteBy)+')':''}: ${escapeHtml(l.leaderNote)}</div>` : '';
+        const requesterNote = (!noteInfo.shared && l.note) ? `<div class="cell-sub">Catatan: ${escapeHtml(l.note)}</div>` : '';
+        const leaderNoteHtml = (!noteInfo.shared && l.leaderNote) ? `<div class="cell-sub" style="color:var(--brand-dark); font-weight:700;">Catatan Kitchen Leader${l.leaderNoteBy?' ('+escapeHtml(l.leaderNoteBy)+')':''}: ${escapeHtml(l.leaderNote)}</div>` : '';
         return `<tr><td>${escapeHtml(l.itemName)}${requesterNote}${leaderNoteHtml}</td><td class="num">${primary}${sub}</td></tr>`;
       }).join('')}</tbody></table>
     </div>
+    ${noteInfo.shared ? docNotesBlockHtml(noteInfo) : ''}
     <div style="margin-top:12px;">Status: ${wipStatusTag(first)}</div>
     ${first.status==='ditolak' && first.rejectNote ? `<div class="cell-sub" style="margin-top:6px;">Alasan penolakan: ${escapeHtml(first.rejectNote)}</div>` : ''}
     ${isWipGatePending(first) && canApproveSR(role) && !canActAsKitchenGate(role, first.divisionId) ? `<div class="lock-note" style="margin-top:10px;">Permintaan ini harus disetujui Kitchen Leader terlebih dahulu sebelum bisa diproses di sini.</div>` : ''}
