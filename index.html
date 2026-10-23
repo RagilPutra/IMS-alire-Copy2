@@ -4456,14 +4456,23 @@ function colSortCompare(cs, getters){
   };
 }
 function msToggleOpen(key){ state.msOpen = state.msOpen===key ? null : key; render(); }
+/* Re-render while keeping the open checklist scrolled where it was, so ticking an
+   option near the bottom doesn't jump the list back to the top. */
+function msRenderKeepScroll(){
+  const pop = document.querySelector('.ms-pop');
+  const top = pop ? pop.scrollTop : 0;
+  render();
+  const np = document.querySelector('.ms-pop');
+  if(np) np.scrollTop = top;
+}
 function msToggleValue(key, v){
   const arr = state[key]; const i = arr.indexOf(v);
   if(i>=0) arr.splice(i,1); else arr.push(v);
   if(MS_PAGE_KEY[key]) state[MS_PAGE_KEY[key]] = 1;
-  render();
+  msRenderKeepScroll();
 }
-function msSelectAll(key, on){ state[key] = on ? (MS_OPTS[key]||[]).slice() : []; if(MS_PAGE_KEY[key]) state[MS_PAGE_KEY[key]] = 1; render(); }
-function msClear(key){ state[key] = []; if(MS_PAGE_KEY[key]) state[MS_PAGE_KEY[key]] = 1; render(); }
+function msSelectAll(key, on){ state[key] = on ? (MS_OPTS[key]||[]).slice() : []; if(MS_PAGE_KEY[key]) state[MS_PAGE_KEY[key]] = 1; msRenderKeepScroll(); }
+function msClear(key){ state[key] = []; if(MS_PAGE_KEY[key]) state[MS_PAGE_KEY[key]] = 1; msRenderKeepScroll(); }
 document.addEventListener('click', ()=>{ if(state.msOpen){ state.msOpen = null; render(); } });
 
 function setInvLocation(v){
@@ -12531,6 +12540,7 @@ document.addEventListener('keydown', (e)=>{
     if(el && !el.hidden) closeCmdk(); else openCmdk();
     return;
   }
+  if(e.key==='Enter' && state.msOpen){ e.preventDefault(); state.msOpen = null; render(); return; }
   if(e.key!=='Escape' || e.defaultPrevented) return;
   if(state.msOpen){ state.msOpen = null; render(); return; }
   const cmdk = document.getElementById('cmdk');
