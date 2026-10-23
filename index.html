@@ -12327,6 +12327,13 @@ function render(){
   // so this only kicks in when staying on the same view as last render.
   const preserveScroll = _lastRenderedView === state.view;
   const savedScrollY = preserveScroll ? window.scrollY : 0;
+  /* Background refreshes (live data polling) rebuild the page every few seconds;
+     keep the inner scroll positions (open filter checklist, scrollable tables) so
+     they don't snap back to the top. A table only keeps its position if its rows
+     are the same as before (so changing a filter/sort/page still starts at the top). */
+  const tableSig = el => { const rows = el.querySelectorAll('tbody tr'); return rows.length + '|' + (rows[0] ? rows[0].textContent.replace(/\s+/g,' ').trim() : ''); };
+  const popTop = preserveScroll && document.querySelector('.ms-pop') ? document.querySelector('.ms-pop').scrollTop : 0;
+  const tableScrolls = preserveScroll ? Array.from(document.querySelectorAll('.table-scroll')).map(el=>({top: el.scrollTop, left: el.scrollLeft, sig: tableSig(el)})) : [];
 
   renderShell();
   const dispatch = {
@@ -12342,6 +12349,11 @@ function render(){
   _lastRenderedView = state.view;
   savePrefs();
   if(preserveScroll) window.scrollTo(0, savedScrollY);
+  if(preserveScroll){
+    const np = document.querySelector('.ms-pop'); if(np && popTop) np.scrollTop = popTop;
+    const nts = document.querySelectorAll('.table-scroll');
+    tableScrolls.forEach((t, i)=>{ const el = nts[i]; if(el && (t.top || t.left) && tableSig(el)===t.sig){ el.scrollTop = t.top; el.scrollLeft = t.left; } });
+  }
 
   if(activeId){
     const el = document.getElementById(activeId);
