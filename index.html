@@ -3569,7 +3569,17 @@ async function actionEditItemMaster(itemId, payload){
   if(nameDup) throw new Error('Nama barang sudah dipakai barang lain.');
   const kodeDup = payload.kode && state.items.find(i=>i.id!==itemId && (i.kode||'').toLowerCase()===payload.kode.trim().toLowerCase());
   if(kodeDup) throw new Error('Kode barang sudah dipakai barang lain.');
-  await db.doc('items/'+itemId).update({ kode: payload.kode || '', name: payload.name.trim(), category: payload.category, uom: payload.uom, lastPrice: payload.price||0, reorderLevel: payload.reorderLevel||0, smallUnit: payload.smallUnit||'', conversionQty: payload.conversionQty||1 });
+  const upd = { kode: payload.kode || '', name: payload.name.trim(), category: payload.category, uom: payload.uom, lastPrice: payload.price||0, reorderLevel: payload.reorderLevel||0, smallUnit: payload.smallUnit||'', conversionQty: payload.conversionQty||1 };
+  // Catat perubahan harga master (harga lama -> baru) supaya muncul di Riwayat Harga.
+  let prevItem = itemById(itemId);
+  try{ const fresh = await db.doc('items/'+itemId).get(); if(fresh && fresh.exists) prevItem = { ...(prevItem||{}), ...fresh.data() }; }catch(e){ /* pakai state lokal */ }
+  const oldPrice = Number(prevItem && prevItem.lastPrice) || 0, newPrice = Number(upd.lastPrice) || 0;
+  if(prevItem && oldPrice !== newPrice){
+    const log = Array.isArray(prevItem.priceLog) ? prevItem.priceLog.slice() : [];
+    log.push({ at: new Date().toISOString(), from: oldPrice, to: newPrice, by: currentUserName || currentRole().name || null });
+    upd.priceLog = log.slice(-50);
+  }
+  await db.doc('items/'+itemId).update(upd);
   toast('Barang diperbarui.');
 }
 async function actionDeleteItem(itemId){
@@ -7737,6 +7747,15 @@ function getPriceHistory(itemId){
       lastPrice = t.price;
     }
   });
+  // Perubahan harga manual lewat Edit Barang (item.priceLog)
+  const it = itemById(itemId);
+  if(it && Array.isArray(it.priceLog)){
+    it.priceLog.forEach(l=>{
+      if(!l || !(l.to>=0)) return;
+      history.push({ price:l.to, prevPrice:l.from, createdAt:l.at, label:'Ubah master', by:l.by, changeType: l.to>l.from ? 'up' : 'down' });
+    });
+    history.sort((a,b)=> new Date(a.createdAt) - new Date(b.createdAt));
+  }
   return history.reverse();
 }
 function renderDrawer(){
@@ -7861,7 +7880,7 @@ function renderDrawer(){
         const color = isUp ? 'var(--danger)' : 'var(--success)';
         return `<div class="loc-row-rich">
           <div class="lrr-top">
-            <div class="lrr-name">${fmtRelative(h.createdAt)}${h.docNumber?' · '+h.docNumber:''}</div>
+            <div class="lrr-name">${fmtRelative(h.createdAt)}${h.docNumber?' · '+h.docNumber:''}${h.label?' · '+h.label+(h.by?' ('+escapeHtml(h.by)+')':''):''}</div>
             <div class="lrr-qty" style="color:${color};">${isUp?'↑':'↓'} ${isUp?'+':''}${pct.toFixed(0)}%</div>
           </div>
           <div class="lrr-value" style="color:${color}; font-weight:700;">${fmtIDR(h.prevPrice)} → ${fmtIDR(h.price)}</div>
