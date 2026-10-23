@@ -7681,11 +7681,23 @@ let _drawerHistoryItemId = null;
 let _drawerHistoryRows = null;
 let _drawerHistoryLoading = false;
 let _lastDrawerItemId = null; // keys the scroll-position preservation in renderDrawer()
+/* Master items created by the Oct-2026 merge ("peleburan") carry item.mergeInfo.from =
+   the old item docs folded into them. Their transactions still point at the old ids,
+   so history lookups cover the item's own id plus those old ids. */
+function itemHistoryIds(item){
+  const ids = [item.id];
+  if(item.mergeInfo && Array.isArray(item.mergeInfo.from)) item.mergeInfo.from.forEach(f=>{ if(f && f.id) ids.push(f.id); });
+  return ids;
+}
 async function loadDrawerFullHistory(itemId){
   _drawerHistoryLoading = true;
   try{
-    const snap = await db.collection('transactions').where('itemId','==',itemId).orderBy('createdAt','desc').limit(100).get();
-    const rows = snap.docs.map(d=>({id:d.id, ...d.data()})).filter(t=>['in','transfer','opname','adjustment'].includes(t.type));
+    const it = itemById(itemId);
+    const ids = it ? itemHistoryIds(it) : [itemId];
+    const snaps = await Promise.all(ids.map(id => db.collection('transactions').where('itemId','==',id).orderBy('createdAt','desc').limit(100).get()));
+    const rows = [].concat(...snaps.map(snap => snap.docs.map(d=>({id:d.id, ...d.data()}))))
+      .filter(t=>['in','transfer','opname','adjustment'].includes(t.type))
+      .sort((a,b)=> new Date(b.createdAt) - new Date(a.createdAt)).slice(0,100);
     if(_drawerHistoryItemId !== itemId) return; // drawer moved on to another item meanwhile
     _drawerHistoryRows = rows;
   }catch(e){
@@ -7761,7 +7773,8 @@ function renderDrawer(){
   // this item that the one-time fetch predates (by id, since the fetch is a
   // single .get() snapshot, not a live listener) so a transaction logged
   // while the drawer is sitting open still shows up immediately.
-  const liveForItem = state.transactions.filter(t=>t.itemId===item.id && ['in','transfer','opname','adjustment'].includes(t.type));
+  const historyIds = new Set(itemHistoryIds(item));
+  const liveForItem = state.transactions.filter(t=>historyIds.has(t.itemId) && ['in','transfer','opname','adjustment'].includes(t.type));
   let historySource;
   if(_drawerHistoryItemId===item.id && _drawerHistoryRows){
     const seen = new Set(_drawerHistoryRows.map(t=>t.id));
@@ -7770,7 +7783,14 @@ function renderDrawer(){
   } else {
     historySource = liveForItem;
   }
-  const moves = historySource.filter(t=>!scope || scope.includes(t.toWarehouseId) || scope.includes(t.fromWarehouseId)).slice(0,10);
+  let moves = historySource.filter(t=>!scope || scope.includes(t.toWarehouseId) || scope.includes(t.fromWarehouseId)).slice(0,10);
+  // Bridge entry for items that came out of the master merge: what old item(s) it replaced and how
+  // the unit/quantity changed. Always shown (not pushed out by newer activity); unrestricted roles only,
+  // since it summarizes stock across all locations.
+  if(!scope && item.mergeInfo && Array.isArray(item.mergeInfo.from) && item.mergeInfo.from.length){
+    moves = [...moves, {type:'merge', id:'merge-'+item.id, createdAt:item.mergeInfo.at, merge:item.mergeInfo}]
+      .sort((a,b)=> new Date(b.createdAt) - new Date(a.createdAt));
+  }
   const movesLoading = _drawerHistoryItemId===item.id && _drawerHistoryLoading && !_drawerHistoryRows;
 
   box.innerHTML = `
@@ -7850,6 +7870,25 @@ function renderDrawer(){
 
       <div class="drawer-section-label">Aktivitas Terbaru${movesLoading ? ' <span class="cell-sub" style="font-weight:400; text-transform:none; letter-spacing:0;">(memuat riwayat lengkap…)</span>' : ''}</div>
       ${moves.length===0 ? `<div class="cell-sub">Belum ada aktivitas.</div>` : moves.map(t=>{
+        if(t.type==='merge'){
+          const nu = String(item.uom||'').toUpperCase();
+          const lines = t.merge.from.map(f=>{
+            const ou = escapeHtml(f.uom||'');
+            const nUom = escapeHtml(String(f.newUom||item.uom||'').toUpperCase());
+            const conv = (f.factor && Number(f.factor)!==1) ? ` <span style="color:var(--warning);">(1 ${ou} lama = ${fmtNum(f.factor)} ${nUom})</span>` : '';
+            const qtyTxt = (f.oldQty||f.newQty) ? `${fmtNum(f.oldQty)} ${ou} → ${fmtNum(f.newQty)} ${nUom}` : 'tanpa stok saat peleburan';
+            return `<div>${escapeHtml(f.name)} <span style="color:var(--text-faint);">(kode lama ${escapeHtml(f.kode||'—')})</span>: ${qtyTxt}${conv}</div>`;
+          }).join('');
+          const totalNew = t.merge.from.reduce((s2,f)=>s2+(f.newQty||0),0);
+          return `<div class="drawer-activity-row">
+            <div class="da-dot opname"></div>
+            <div class="da-body">
+              <div class="da-type opname">Peleburan Master · ${fmtDate(t.createdAt)}</div>
+              <div class="da-detail">Riwayat sebelum tanggal ini memakai satuan barang lama.${lines}</div>
+            </div>
+            <div class="da-qty opname">${totalNew ? '= '+fmtNum(totalNew)+' '+escapeHtml(item.uom||'') : ''}</div>
+          </div>`;
+        }
         const isIn = t.type==='in';
         const isOpname = t.type==='opname';
         const isAdjustment = t.type==='adjustment';
